@@ -6,8 +6,8 @@ from torch.utils.data import DataLoader, random_split
 
 def load_train_val_data(batch_size=64):
     
-    train_dir = "replace_with_your_train_directory_path"
-    val_dir = "replace_with_your_val_directory_path"
+    train_dir = "C:\\Users\\dnslab_dear\\Desktop\\paddy dataset\\paddy_resize\\split_data\\train"
+    val_dir = "C:\\Users\\dnslab_dear\\Desktop\\paddy dataset\\paddy_resize\\split_data\\val"
     
     transforms_all = transforms.Compose([
     transforms.Resize((224, 224)),

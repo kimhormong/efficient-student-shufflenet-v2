@@ -60,10 +60,60 @@ class ShuffleV2Block(nn.Module):
         x = x.permute(1, 0, 2)
         x = x.reshape(2, -1, num_channels // 2, height, width)
         return x[0], x[1]
+    
+    
+class FusedIB2(nn.Module):
+    def __init__(self, in_chs, out_chs, stride=1, ):
+        super().__init__()
+        self.use_res = stride == 1 and in_chs == out_chs
+
+        # 1. Fused Layer: 3x3 Standard Conv (Expands and processes spatially)
+        self.fused = nn.Sequential(
+            nn.Conv2d(in_chs, out_chs, 3, stride=stride, padding=1, bias=False),
+            nn.BatchNorm2d(out_chs),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_chs, out_chs, 1, stride=1, bias=False),
+        )
+
+    def forward(self, x):
+        out = self.fused(x)
+        
+        if self.use_res:
+            return out + x
+        return out    
+    
+    
+class FusedIB(nn.Module):
+    def __init__(self, in_chs, out_chs, stride=1, exp_ratio=4):
+        super().__init__()
+        mid_chs = int(in_chs * exp_ratio)
+        self.use_res = stride == 1 and in_chs == out_chs
+
+        # 1. Fused Layer: 3x3 Standard Conv (Expands and processes spatially)
+        self.fused = nn.Sequential(
+            nn.Conv2d(in_chs, mid_chs, 3, stride, padding=1, bias=False),
+            nn.BatchNorm2d(mid_chs),
+            nn.ReLU6(inplace=True)
+        )
+
+        # 2. Projection Layer: 1x1 Conv (Compresses back to output size)
+        # Note: No activation function here (Linear Bottleneck)
+        self.project = nn.Sequential(
+            nn.Conv2d(mid_chs, out_chs, 1, 1, 0, bias=False),
+            nn.BatchNorm2d(out_chs)
+        )
+
+    def forward(self, x):
+        out = self.fused(x)
+        out = self.project(out)
+        
+        if self.use_res:
+            return out + x
+        return out
 
 
 class ShuffleNetV2(nn.Module):
-    def __init__(self, input_size=224, n_class=1000, model_size='0.75x'):
+    def __init__(self, input_size=224, n_class=1000, model_size='0.75x', fused_ib = False):
         super(ShuffleNetV2, self).__init__()
         print('model size is ', model_size)
 
@@ -91,8 +141,9 @@ class ShuffleNetV2(nn.Module):
             nn.BatchNorm2d(input_channel),
             nn.ReLU(inplace=True),
         )
-
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        
+        
+        self.fused_or_max = FusedIB2(input_channel, input_channel, stride=2) if fused_ib else nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
         self.features = []
         for idxstage in range(len(self.stage_repeats)):
@@ -123,7 +174,7 @@ class ShuffleNetV2(nn.Module):
 
     def forward(self, x):
         x = self.first_conv(x)
-        x = self.maxpool(x)
+        x = self.fused_or_max(x)
         x = self.features(x)
         x = self.conv_last(x)
 
